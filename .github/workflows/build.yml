@@ -1,33 +1,88 @@
 name: Free standard macOS build
 on:
   workflow_dispatch:
+    inputs:
+      resume_tag:
+        description: Complete checkpoint release tag; leave empty for a clean build
+        type: string
+        default: ''
+      generation:
+        description: Segment number (automatic continuation stops after four)
+        type: string
+        default: '1'
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: macos-build
   cancel-in-progress: false
 jobs:
   build:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && github.repository == 'senrishi/mercury-refresh-build'
     runs-on: macos-26
     timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RESUME_TAG: ${{ inputs.resume_tag }}
+      GENERATION: ${{ inputs.generation }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check checkpoint helpers with synthetic fixtures
+        run: python3 -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: Validate segment and reserve checkpoint time
+        run: |
+          python3 - <<'PY'
+          import os, re, time
+          generation = os.environ['GENERATION']
+          assert generation in ('1','2','3','4'), 'Invalid generation'
+          tag = os.environ['RESUME_TAG']
+          assert not tag or re.fullmatch(r'checkpoint-\d+-\d+', tag), 'Invalid checkpoint tag'
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'BUILD_DEADLINE={int(time.time()) + 210*60}\n')
+          PY
       - name: Select pinned Xcode and record environment
         run: |
           mkdir -p output
           sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           { sw_vers; uname -a; df -h; xcodebuild -version; xcrun --show-sdk-version; } > output/runner.txt 2>&1
           cp upstream.json output/
-      - name: Compile and package
-        run: bash scripts/build.sh
+      - name: Compile or stop at checkpoint deadline
+        id: compile
+        run: |
+          set +e
+          bash scripts/build.sh
+          RESULT=$?
+          set -e
+          if [ "$RESULT" -eq 75 ]; then
+            echo 'checkpoint=true' >> "$GITHUB_OUTPUT"
+            echo 'Compilation stopped for a checkpoint; browser is not finished.'
+          else
+            echo 'checkpoint=false' >> "$GITHUB_OUTPUT"
+            exit "$RESULT"
+          fi
+      - name: Save stopped incremental build
+        id: checkpoint
+        if: steps.compile.outputs.checkpoint == 'true'
+        run: |
+          TAG="checkpoint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/checkpoint.py save "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Publish build or failure evidence as free release assets
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
           RESULT: ${{ job.status }}
         run: |
-          test -f output/build.log && gzip -f output/build.log
-          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment build; ad-hoc signed, not notarized. Failure releases may contain diagnostics only.\n")'
+          test ! -f output/build.log || gzip -f output/build.log
+          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment build; ad-hoc signed, not notarized. A checkpoint is unfinished compilation, not a packaged browser.\n")'
           shasum -a 256 output/*.* > output/ASSET-SHA256SUMS
           gh release create "cloud-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" output/*.* output/ASSET-SHA256SUMS --target "$GITHUB_SHA" --prerelease --title "ARM cloud build ${GITHUB_RUN_ID}: $RESULT" --notes-file output/RESULT.txt
+      - name: Resume verified checkpoint in a fresh free job
+        if: success() && steps.checkpoint.outputs.tag != ''
+        env:
+          CHECKPOINT_TAG: ${{ steps.checkpoint.outputs.tag }}
+        run: |
+          if [ "$GENERATION" -ge 4 ]; then
+            echo 'Four-segment safety cap reached. Checkpoint saved; manual review required.'
+            exit 0
+          fi
+          gh workflow run build.yml --ref "$CHECKPOINT_TAG" -f "resume_tag=$CHECKPOINT_TAG" -f "generation=$((GENERATION + 1))"
