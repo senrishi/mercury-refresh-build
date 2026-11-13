@@ -1,0 +1,33 @@
+name: Free standard macOS build
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: macos-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select pinned Xcode and record environment
+        run: |
+          mkdir -p output
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          { sw_vers; uname -a; df -h; xcodebuild -version; xcrun --show-sdk-version; } > output/runner.txt 2>&1
+          cp upstream.json output/
+      - name: Compile and package
+        run: bash scripts/build.sh
+      - name: Publish build or failure evidence as free release assets
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          test -f output/build.log && gzip -f output/build.log
+          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment build; ad-hoc signed, not notarized. Failure releases may contain diagnostics only.\n")'
+          shasum -a 256 output/*.* > output/ASSET-SHA256SUMS
+          gh release create "cloud-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" output/*.* output/ASSET-SHA256SUMS --target "$GITHUB_SHA" --prerelease --title "ARM cloud build ${GITHUB_RUN_ID}: $RESULT" --notes-file output/RESULT.txt

@@ -1,0 +1,8 @@
+{
+  "version": "160.0",
+  "tag": "FIREFOX_160_0_RELEASE",
+  "revision": "2887d9de1f69c0e9776413da80e7ba0d1225dd9b",
+  "repository": "https://github.com/mozilla-firefox/firefox.git",
+  "mercury_audit_revision": "21186f1213ffcbf805c2c14e47a7c265a66104fb",
+  "sdk_minimum": "26.5"
+}
