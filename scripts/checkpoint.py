@@ -19,7 +19,7 @@ def command(*args, **kwargs):
 
 
 def identity(root):
-    files = [root/'upstream.json', root/'config/mozconfig', root/'patches/series']
+    files = [root/'upstream.json', root/'product.json', root/'config/mozconfig', root/'patches/series']
     files += sorted((root/'patches').glob('*.patch'))
     files += sorted((root/'scripts').glob('*.py')) + [root/'scripts/build.sh']
     digest = hashlib.sha256()
@@ -44,7 +44,7 @@ def source_digest(root):
 
 
 def upload(tag, path):
-    subprocess.run(['gh', 'release', 'upload', tag, str(path)], check=True)
+    subprocess.run(['gh', 'release', 'upload', os.environ['RELEASE_TAG'], str(path)], check=True)
 
 
 def save(root, tag):
@@ -52,9 +52,7 @@ def save(root, tag):
         raise RuntimeError('Bootstrap not completed: no resumable checkpoint will be published')
     metadata = identity(root)
     metadata['source_diff_sha256'] = source_digest(root)
-    subprocess.run(['gh', 'release', 'create', tag, '--target', os.environ['GITHUB_SHA'],
-                    '--prerelease', '--title', tag+' — build checkpoint, not a browser',
-                    '--notes', 'Stopped incremental build state. Only checkpoints with manifest.json are complete. No installable browser in this release.'], check=True)
+    release = os.environ['RELEASE_TAG']
     env = dict(os.environ, COPYFILE_DISABLE='1')
     tar = subprocess.Popen(['tar', '-cf', '-', '-C', str(root), 'source',
                             '-C', str(Path.home()), '.mozbuild'], stdout=subprocess.PIPE, env=env)
@@ -64,7 +62,7 @@ def save(root, tag):
     try:
         with tempfile.TemporaryDirectory(prefix='checkpoint-save-') as directory:
             while True:
-                part = Path(directory)/f'checkpoint.part{len(parts):04d}'
+                part = Path(directory)/f'{tag}.part{len(parts):04d}'
                 digest = hashlib.sha256()
                 size = 0
                 with part.open('wb') as target:
@@ -87,7 +85,7 @@ def save(root, tag):
                 raise RuntimeError('Archive creation failed; checkpoint is incomplete')
             metadata['parts'] = parts
             metadata['complete'] = True
-            manifest = Path(directory)/'manifest.json'
+            manifest = Path(directory)/(tag+'-manifest.json')
             manifest.write_text(json.dumps(metadata, indent=2)+'\n')
             upload(tag, manifest)  # Commit marker: only upload after all chunks succeeded.
         (root/'output/checkpoint.json').write_text(json.dumps(dict(tag=tag, complete=True, parts=len(parts)), indent=2)+'\n')
@@ -107,9 +105,9 @@ def restore(root, tag):
     with tempfile.TemporaryDirectory(prefix='checkpoint-restore-') as directory:
         def download(name):
             path = Path(directory)/name
-            subprocess.run(['gh', 'release', 'download', tag, '--pattern', name, '--dir', directory], check=True)
+            subprocess.run(['gh', 'release', 'download', os.environ['RELEASE_TAG'], '--pattern', name, '--dir', directory], check=True)
             return path
-        manifest = json.loads(download('manifest.json').read_text())
+        manifest = json.loads(download(tag+'-manifest.json').read_text())
         if not manifest.get('complete'):
             raise RuntimeError('Checkpoint has no complete manifest')
         expected = identity(root)
@@ -122,7 +120,7 @@ def restore(root, tag):
         tar = subprocess.Popen(['tar', '-xzf', '-', '-C', str(root)], stdin=subprocess.PIPE)
         try:
             for index, record in enumerate(parts):
-                name = f'checkpoint.part{index:04d}'
+                name = f'{tag}.part{index:04d}'
                 if record['name'] != name or not 0 < record['bytes'] <= CHUNK_BYTES:
                     raise RuntimeError('Invalid part manifest')
                 part = download(name)

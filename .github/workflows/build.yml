@@ -2,12 +2,20 @@ name: Free standard macOS build
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Verify packaging without Firefox compilation, or build Firefox
+        type: choice
+        options: [verify, build]
+        default: verify
+      release_tag:
+        description: Fixed tag/draft release created by scripts/dispatch.py
+        type: string
+        required: true
       resume_tag:
-        description: Complete checkpoint release tag; leave empty for a clean build
+        description: Complete checkpoint key in the same draft release
         type: string
         default: ''
       generation:
-        description: Segment number (automatic continuation stops after four)
         type: string
         default: '1'
 permissions:
@@ -23,30 +31,41 @@ jobs:
     timeout-minutes: 350
     env:
       GH_TOKEN: ${{ github.token }}
+      BUILD_MODE: ${{ inputs.mode }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
       RESUME_TAG: ${{ inputs.resume_tag }}
       GENERATION: ${{ inputs.generation }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify fixed release upload access before compilation
+        run: python3 scripts/release-access.py
       - name: Check checkpoint helpers with synthetic fixtures
         run: python3 -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: Check pinned upstream identity and patch application
+        run: python3 scripts/check-config.py
       - name: Validate segment and reserve checkpoint time
         run: |
           python3 - <<'PY'
           import os, re, time
-          generation = os.environ['GENERATION']
-          assert generation in ('1','2','3','4'), 'Invalid generation'
-          tag = os.environ['RESUME_TAG']
-          assert not tag or re.fullmatch(r'checkpoint-\d+-\d+', tag), 'Invalid checkpoint tag'
-          with open(os.environ['GITHUB_ENV'], 'a') as output:
-              output.write(f'BUILD_DEADLINE={int(time.time()) + 210*60}\n')
+          assert os.environ['GENERATION'] in ('1','2','3','4')
+          assert os.environ['BUILD_MODE'] in ('verify','build')
+          tag=os.environ['RESUME_TAG']
+          assert not tag or re.fullmatch(r'checkpoint-\d+-\d+',tag)
+          with open(os.environ['GITHUB_ENV'],'a') as result:
+              result.write(f'BUILD_DEADLINE={int(time.time())+210*60}\n')
           PY
       - name: Select pinned Xcode and record environment
         run: |
-          mkdir -p output
           sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           { sw_vers; uname -a; df -h; xcodebuild -version; xcrun --show-sdk-version; } > output/runner.txt 2>&1
-          cp upstream.json output/
-      - name: Compile or stop at checkpoint deadline
+          cp upstream.json product.json output/
+      - name: Exercise actual DMG validation with synthetic app and nested helpers
+        if: inputs.mode == 'verify'
+        run: python3 scripts/verify-packaging.py
+      - name: Compile and preserve original package before downstream validation
+        if: inputs.mode == 'build'
         id: compile
         run: |
           set +e
@@ -55,38 +74,28 @@ jobs:
           set -e
           if [ "$RESULT" -eq 75 ]; then
             echo 'checkpoint=true' >> "$GITHUB_OUTPUT"
-            echo 'Compilation stopped for a checkpoint; browser is not finished.'
           else
-            echo 'checkpoint=false' >> "$GITHUB_OUTPUT"
             exit "$RESULT"
           fi
-      - name: Save stopped incremental build
+      - name: Save stopped incremental build to existing draft release
         id: checkpoint
         if: steps.compile.outputs.checkpoint == 'true'
         run: |
-          TAG="checkpoint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          python3 scripts/checkpoint.py save "$TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Publish build or failure evidence as free release assets
+          KEY="checkpoint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/checkpoint.py save "$KEY"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+      - name: Preserve logs, packages and checksums in the existing release
         if: always()
         env:
           RESULT: ${{ job.status }}
-        run: |
-          test ! -f output/build.log || gzip -f output/build.log
-          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment DMG. No Developer ID signature or notarization. A checkpoint is unfinished compilation, not a packaged browser.\n")'
-          shasum -a 256 output/*.* > output/ASSET-SHA256SUMS
-          ASSETS=()
-          for ASSET in output/*; do
-            if [ -f "$ASSET" ]; then ASSETS+=("$ASSET"); fi
-          done
-          gh release create "cloud-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "${ASSETS[@]}" --target "$GITHUB_SHA" --prerelease --title "ARM cloud build ${GITHUB_RUN_ID}: $RESULT" --notes-file output/RESULT.txt
-      - name: Resume verified checkpoint in a fresh free job
-        if: success() && steps.checkpoint.outputs.tag != ''
+        run: python3 scripts/publish.py
+      - name: Resume complete checkpoint in another free job
+        if: success() && steps.checkpoint.outputs.key != ''
         env:
-          CHECKPOINT_TAG: ${{ steps.checkpoint.outputs.tag }}
+          CHECKPOINT_KEY: ${{ steps.checkpoint.outputs.key }}
         run: |
           if [ "$GENERATION" -ge 4 ]; then
-            echo 'Four-segment safety cap reached. Checkpoint saved; manual review required.'
+            echo 'Four-segment limit reached; checkpoint retained for review.'
             exit 0
           fi
-          gh workflow run build.yml --ref "$CHECKPOINT_TAG" -f "resume_tag=$CHECKPOINT_TAG" -f "generation=$((GENERATION + 1))"
+          gh workflow run build.yml --ref "$RELEASE_TAG" -f mode=build -f "release_tag=$RELEASE_TAG" -f "resume_tag=$CHECKPOINT_KEY" -f "generation=$((GENERATION+1))"

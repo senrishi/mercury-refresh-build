@@ -1,4 +1,6 @@
 """Verify mach's packaged DMG and stage the original DMG for personal use."""
+import json
+import shutil
 import os
 import pathlib
 import plistlib
@@ -7,6 +9,7 @@ import tempfile
 
 assert os.environ.get("GITHUB_ACTIONS") == "true", "Cloud execution only"
 root=pathlib.Path.cwd()
+product=json.loads((root/"product.json").read_text())
 dist=root/"source/obj-refresh/dist"
 dmgs=list(dist.glob("mercury-refresh-*.dmg"))
 assert len(dmgs)==1, f"Expected one MercuryRefresh DMG from mach package: {dmgs}"
@@ -24,10 +27,12 @@ with tempfile.TemporaryDirectory(prefix="mercury-refresh-package-") as temporary
             if item.is_symlink():
                 assert item.resolve().is_relative_to(app.resolve()), f"External symlink: {item}"
         info=plistlib.loads((app/"Contents/Info.plist").read_bytes())
-        assert info["CFBundleIdentifier"]=="io.github.senrishi.mercuryrefresh", info["CFBundleIdentifier"]
-        assert info["CFBundleExecutable"] and (app/"Contents/MacOS"/info["CFBundleExecutable"]).is_file()
+        assert info["CFBundleIdentifier"]==product["bundle_id"], info["CFBundleIdentifier"]
+        assert info["CFBundleExecutable"]==product["executable"], info["CFBundleExecutable"]
+        assert (app/"Contents/MacOS"/info["CFBundleExecutable"]).is_file()
         target=root/"output/MercuryRefresh-arm64-development.dmg"
         target.parent.mkdir(parents=True,exist_ok=True)
-        target.write_bytes(dmg.read_bytes())
+        shutil.copyfile(dmg,target)
+        (root/"output/validation.json").write_text(json.dumps({"bundle_id":info["CFBundleIdentifier"],"executable":info["CFBundleExecutable"],"dmg_verified":True,"launch_tested":False},indent=2)+"\n")
     finally:
         subprocess.run(["hdiutil","detach",str(mount),"-force"],check=True,timeout=60)

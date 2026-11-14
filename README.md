@@ -1,25 +1,37 @@
-# Mercury Refresh cloud build
+# Mercury Refresh cloud builds
 
-Public build inputs for a personal experimental ARM64 Firefox derivative. The DMG retains Firefox build signatures (ad-hoc at binary level only); it is not Developer ID signed or notarized. No memory improvement has been measured. Source revision: upstream.json; downstream changes: patches/series.
+Experimental personal ARM64 Firefox derivative; source pin in upstream.json, identity in product.json, ordered patches in patches/series. No memory or speed improvement has been measured. No Developer ID signing or notarization. Binary linker ad-hoc signatures are retained. Never reuse an everyday profile.
 
-Only standard GitHub-hosted macos-26 runners are permitted. Do not switch to larger or self-hosted runners. No private repository credentials, profiles, or signing keys are used.
+## Execution and zero spending
 
-## Checkpointed compilation
+Only the public repository's standard `macos-26` runner is used. Jobs refuse private repositories. No larger runner, self-hosted Mac, Actions artifact uploads or cache charges. Never compile Firefox locally.
 
-Compilation/bootstrap are given 210 minutes from the job setup. At that deadline, the compiler process group is interrupted and remaining workers killed before archiving. The 350-minute job cap leaves roughly 140 minutes for snapshot transfer and diagnostics. A source checkout, object directory and ~/.mozbuild state are streamed into gzip level 1 and <=1 GiB Release chunks, with SHA-256 per chunk. The complete manifest is uploaded last. Only completed bootstrap state is resumable. No caches or Actions artifact storage are used.
+Prepare an immutable tag and draft release **before** dispatching:
 
-Resume requires matching input hashes, pinned upstream revision, source modifications, Xcode, SDK, Python executable/version, OS/image, architecture, home and checkout paths. Mismatches fail visibly rather than silently reusing incompatible objects. Source/object timestamps and symlinks are retained by tar. Restoring a checkpoint is incremental compilation, not a saved running process: interrupted compilation units or linking restart. Build-system decisions may recompile additional work. This needs validation on a real Firefox checkpoint; synthetic archive/restore tests pass.
+```
+python3 scripts/dispatch.py verify
+python3 scripts/dispatch.py build
+```
 
-After a verified checkpoint upload, another standard free Mac job starts automatically, up to four segments. Continuation uses the checkpoint tag's exact project commit. A failed upload, ordinary compiler error, identity mismatch, hard job timeout, or fourth segment stops automation for review. Bootstrap that exceeds the deadline cannot yet be checkpointed. Compression/upload can still overrun the reserved time, so checkpointing cannot guarantee completion.
+The dispatch script uses existing local gh credentials only to prepare the fixed tag/release and dispatch a cloud workflow. It does not compile or upload credentials. CI receives only the built-in GitHub token, verifies release upload access before compilation, and uploads into the existing release. This avoids GitHub restrictions on creating tags for historical workflow-changing commits when main moves during a long build.
 
-The initial non-checkpointed run 43481496635 is left untouched. A separate workflow starts the new pipeline only if that initial job reports timed_out; success and ordinary failures do not cause an automatic retry. That first timeout loses the initial run's intermediate work because its original workflow has no save hook. Later segments can retain completed work.
+`verify` runs synthetic DMG checks on a cloud Mac without compiling or launching Firefox. It verifies nested helper handling, identity rejection, missing executable rejection, external symlink rejection and damaged-image rejection. Test outputs remain in a draft release and are clearly labeled synthetic.
 
-Manual recovery: dispatch build.yml with resume_tag=checkpoint-RUN_ID-ATTEMPT and generation=1 after reviewing a completed manifest. Keep the same project tag and runner image. Never run checkpoint data from an untrusted repository.
+`build` checks patch application and runs the pinned Firefox bundle-ID calculation before fetching the full source. It compiles, uses `mach package` to create the standalone DMG, and copies an `UNVALIDATED-...dmg` into the draft release staging area **before** custom validation. Disk checksum, top-level app selection, bundle ID, executable and symlink containment are verified. On success the original DMG is published with validation metadata, provenance, source revision, logs, license and SHA256SUMS. On a downstream validation failure the raw package and diagnostics stay in the draft release so work is not discarded. It is not an approved browser artifact until validation passes.
 
-Tests (synthetic files and short-lived Python processes only): python3 -m unittest discover -s tests -v. No local Firefox compilation or browser launch is involved.
+## Checkpoints
 
-The downloadable artifact is Firefox's verified, packaged ARM64 DMG. The cloud workflow checks the disk image, browser bundle ID, app executable and symlink containment; it does not re-sign the app or launch it. Local-only ad-hoc signatures are retained from Firefox's linker. The app is not notarized and macOS may require a per-app approval. Copy MercuryRefresh.app to Applications before launching. Test first with a separate profile:
+After 210 minutes of bootstrap/compilation the worker group is stopped. Approximately 140 minutes remain under the 350-minute job limit to stream source, object directory and ~/.mozbuild into <=1 GiB gzip chunks. Checkpoints upload into the already-prepared draft release using a unique `checkpoint-RUN-ATTEMPT` key. Each part has a SHA-256 and size; the complete manifest uploads last. Incomplete checkpoints cannot be restored.
+
+Resume requires exact source revision, build-input hash, image/OS, Xcode/SDK, Python, architecture and checkout/home paths. Archives preserve source/object timestamps and symlinks. Interrupted compile or link operations restart. A complete checkpoint automatically dispatches the next segment on the fixed tag with the same release, capped at four segments. Failures stop automation. Checkpoint code is covered by synthetic round-trip/corruption/mismatch tests; actual Firefox checkpoint restore still awaits a cloud checkpoint.
+
+## Personal installation
+
+The pipeline does not re-sign or launch the browser. macOS may require per-app approval because the app is not notarized. Copy MercuryRefresh.app from the DMG to Applications and use an isolated profile:
 
 ```sh
+mkdir -p "$HOME/Library/Application Support/MercuryRefresh-Test"
 open -na /Applications/MercuryRefresh.app --args --no-remote --profile "$HOME/Library/Application Support/MercuryRefresh-Test"
 ```
+
+Available security features, extension behavior and performance still need validation. Auto-updating is disabled pending a signed update service. Install updates manually.

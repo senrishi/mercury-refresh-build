@@ -7,6 +7,7 @@ export MOZ_NOSPAM=1
 mkdir -p output
 exec > >(tee -a "$ROOT/output/build.log") 2>&1
 python3 scripts/preflight.py
+python3 scripts/check-config.py
 REV=$(python3 -c 'import json; print(json.load(open("upstream.json"))["revision"])')
 if [[ -n "${RESUME_TAG:-}" ]]; then
   python3 scripts/checkpoint.py restore "$RESUME_TAG"
@@ -33,6 +34,14 @@ fi
 python3 "$ROOT/scripts/bounded.py" ./mach build
 ./mach package
 cd "$ROOT"
+# Preserve the upstream package before any downstream assertion can fail.
+python3 - <<'STAGE'
+from pathlib import Path
+import shutil
+root=Path.cwd()
+for i, image in enumerate(sorted((root/'source/obj-refresh/dist').glob('*.dmg'))):
+    shutil.copyfile(image,root/'output'/f'UNVALIDATED-{i}-{image.name}')
+STAGE
 python3 scripts/package.py
 cp upstream.json config/mozconfig output/
 python3 - <<'PROVENANCE'
@@ -42,4 +51,4 @@ pathlib.Path('output/provenance.json').write_text(json.dumps(p,indent=2)+'\n')
 PROVENANCE
 cp -R patches output/patches
 cp LICENSE output/LICENSE
-shasum -a 256 output/*.dmg > output/SHA256SUMS
+rm -f output/UNVALIDATED-*.dmg

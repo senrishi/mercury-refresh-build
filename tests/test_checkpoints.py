@@ -50,7 +50,7 @@ class CheckpointTests(unittest.TestCase):
                         patch.object(checkpoint, 'source_digest', return_value='fixture-diff'),
                         patch.object(checkpoint.Path, 'home', return_value=self.home),
                         patch.object(checkpoint.subprocess, 'run', side_effect=mock_run),
-                        patch.dict('os.environ', {'GITHUB_SHA':'fixture-sha'}),
+                        patch.dict('os.environ', {'GITHUB_SHA':'fixture-sha','RELEASE_TAG':'fixture-release'}),
                         patch.object(checkpoint, 'CHUNK_BYTES', 256)]
         for p in self.patches:p.start()
     def tearDown(self):
@@ -63,7 +63,7 @@ class CheckpointTests(unittest.TestCase):
         shutil.rmtree(self.home/'.mozbuild')
     def test_streaming_round_trip_preserves_objects_symlinks_and_timestamps(self):
         self.save()
-        manifest=json.loads((self.assets/'manifest.json').read_text())
+        manifest=json.loads((self.assets/'checkpoint-123-1-manifest.json').read_text())
         self.assertGreater(len(manifest['parts']), 1)
         self.reset()
         checkpoint.restore(self.root, 'checkpoint-123-1')
@@ -74,14 +74,14 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual((self.home/'.mozbuild/toolchain.fixture').read_text(), 'synthetic toolchain')
     def test_corruption_is_rejected(self):
         self.save(); self.reset()
-        (self.assets/'checkpoint.part0000').write_bytes(b'corrupt')
+        (self.assets/'checkpoint-123-1.part0000').write_bytes(b'corrupt')
         with self.assertRaisesRegex(RuntimeError, 'Corrupt checkpoint'):
             checkpoint.restore(self.root, 'checkpoint-123-1')
     def test_identity_mismatch_rejected_before_extracting(self):
         self.save(); self.reset()
-        manifest=json.loads((self.assets/'manifest.json').read_text())
+        manifest=json.loads((self.assets/'checkpoint-123-1-manifest.json').read_text())
         manifest['inputs_sha256']='wrong'
-        (self.assets/'manifest.json').write_text(json.dumps(manifest))
+        (self.assets/'checkpoint-123-1-manifest.json').write_text(json.dumps(manifest))
         with self.assertRaisesRegex(RuntimeError, 'Incompatible checkpoint'):
             checkpoint.restore(self.root, 'checkpoint-123-1')
         self.assertFalse((self.root/'source').exists())
