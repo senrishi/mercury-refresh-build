@@ -17,8 +17,8 @@ with tempfile.TemporaryDirectory(prefix="mercury-refresh-package-") as temporary
     mount.mkdir()
     subprocess.run(["hdiutil","attach","-readonly","-nobrowse","-mountpoint",str(mount),str(dmgs[0])],check=True,timeout=120)
     try:
-        apps=[p for p in mount.rglob("*.app") if (p/"Contents/MacOS").is_dir()]
-        assert len(apps)==1, f"Expected one packaged browser app in DMG: {apps}"
+        apps=[p for p in mount.glob("*.app") if (p/"Contents/MacOS").is_dir()]
+        assert len(apps)==1, f"Expected one top-level packaged browser app in DMG: {apps}"
         source=apps[0]
         for p in source.rglob("*"):
             if p.is_symlink():
