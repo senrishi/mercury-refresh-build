@@ -73,7 +73,7 @@ jobs:
           RESULT: ${{ job.status }}
         run: |
           test ! -f output/build.log || gzip -f output/build.log
-          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment build; ad-hoc signed, not notarized. A checkpoint is unfinished compilation, not a packaged browser.\n")'
+          python3 -c 'import os,pathlib; pathlib.Path("output/RESULT.txt").write_text("Job status: "+os.environ["RESULT"]+"\nDevelopment DMG. No Developer ID signature or notarization. A checkpoint is unfinished compilation, not a packaged browser.\n")'
           shasum -a 256 output/*.* > output/ASSET-SHA256SUMS
           gh release create "cloud-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" output/*.* --target "$GITHUB_SHA" --prerelease --title "ARM cloud build ${GITHUB_RUN_ID}: $RESULT" --notes-file output/RESULT.txt
       - name: Resume verified checkpoint in a fresh free job

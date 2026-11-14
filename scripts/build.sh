@@ -37,9 +37,9 @@ python3 scripts/package.py
 cp upstream.json config/mozconfig output/
 python3 - <<'PROVENANCE'
 import json, os, pathlib, subprocess
-p=dict(project_revision=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(), upstream=json.load(open('upstream.json')),run_url=f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}", signing="ad-hoc development; not notarized", xcode=subprocess.check_output(['xcodebuild','-version'],text=True),sdk=subprocess.check_output(['xcrun','--show-sdk-version'],text=True).strip())
+p=dict(project_revision=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(), upstream=json.load(open('upstream.json')),run_url=f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}", signing="Firefox Mach-O linker ad-hoc signatures only; DMG and app are not Developer ID signed or notarized", xcode=subprocess.check_output(['xcodebuild','-version'],text=True),sdk=subprocess.check_output(['xcrun','--show-sdk-version'],text=True).strip())
 pathlib.Path('output/provenance.json').write_text(json.dumps(p,indent=2)+'\n')
 PROVENANCE
 cp -R patches output/patches
 cp LICENSE output/LICENSE
-shasum -a 256 output/*.zip > output/SHA256SUMS
+shasum -a 256 output/*.dmg > output/SHA256SUMS

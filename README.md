@@ -1,6 +1,6 @@
 # Mercury Refresh cloud build
 
-Public build inputs for a personal experimental ARM64 Firefox derivative. Development artifacts are ad-hoc signed, not notarized. No memory improvement has been measured. Source revision: upstream.json; downstream changes: patches/series.
+Public build inputs for a personal experimental ARM64 Firefox derivative. The DMG retains Firefox build signatures (ad-hoc at binary level only); it is not Developer ID signed or notarized. No memory improvement has been measured. Source revision: upstream.json; downstream changes: patches/series.
 
 Only standard GitHub-hosted macos-26 runners are permitted. Do not switch to larger or self-hosted runners. No private repository credentials, profiles, or signing keys are used.
 
@@ -17,3 +17,9 @@ The initial non-checkpointed run 43481496635 is left untouched. A separate workf
 Manual recovery: dispatch build.yml with resume_tag=checkpoint-RUN_ID-ATTEMPT and generation=1 after reviewing a completed manifest. Keep the same project tag and runner image. Never run checkpoint data from an untrusted repository.
 
 Tests (synthetic files and short-lived Python processes only): python3 -m unittest discover -s tests -v. No local Firefox compilation or browser launch is involved.
+
+The downloadable artifact is Firefox's verified, packaged ARM64 DMG. The cloud workflow checks the disk image, browser bundle ID, app executable and symlink containment; it does not re-sign the app or launch it. Local-only ad-hoc signatures are retained from Firefox's linker. The app is not notarized and macOS may require a per-app approval. Copy MercuryRefresh.app to Applications before launching. Test first with a separate profile:
+
+```sh
+open -na /Applications/MercuryRefresh.app --args --no-remote --profile "$HOME/Library/Application Support/MercuryRefresh-Test"
+```
