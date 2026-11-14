@@ -7,4 +7,4 @@
 -MOZ_APP_DISPLAYNAME=Nightly
 -MOZ_MACBUNDLE_ID=nightlyunofficial
 +MOZ_APP_DISPLAYNAME=MercuryRefresh
-+MOZ_MACBUNDLE_ID=io.github.senrishi.mercuryrefresh
++MOZ_MACBUNDLE_ID=mercuryrefresh

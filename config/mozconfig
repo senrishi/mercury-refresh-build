@@ -7,7 +7,7 @@ ac_add_options --disable-tests
 ac_add_options --enable-optimize
 ac_add_options --with-app-name=mercury-refresh
 ac_add_options --with-app-basename=MercuryRefresh
-ac_add_options --with-distribution-id=io.github.senrishi.mercuryrefresh
+ac_add_options --with-distribution-id=io.github.senrishi
 ac_add_options --disable-updater
 export MOZ_REQUIRE_SIGNING=1
 mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-refresh
