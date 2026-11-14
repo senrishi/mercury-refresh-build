@@ -21,7 +21,17 @@ jobs:
       - name: Retry only a confirmed execution timeout
         run: |
           gh api "repos/$GH_REPO/actions/runs/43481496635/jobs" > /tmp/initial-jobs.json
-          if python3 -c 'import json; import sys; sys.exit(0 if any(j["conclusion"] == "timed_out" for j in json.load(open("/tmp/initial-jobs.json"))["jobs"]) else 1)'; then
+          python3 - <<'PYCODE'
+          import json, os, subprocess
+          jobs = json.load(open('/tmp/initial-jobs.json'))['jobs']
+          timed_out = any(job['conclusion'] == 'timed_out' for job in jobs)
+          for job in jobs:
+              annotations = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['GH_REPO']}/check-runs/{job['id']}/annotations"], text=True))
+              timed_out |= any('exceeded the maximum execution time' in item.get('message', '').lower() for item in annotations)
+          with open('/tmp/confirmed-timeout', 'w') as result:
+              result.write(str(timed_out).lower())
+          PYCODE
+          if [ "$(cat /tmp/confirmed-timeout)" = true ]; then
             gh workflow run build.yml --ref main -f generation=1
             echo 'Initial job timed out. Started first checkpoint-enabled segment.'
           else

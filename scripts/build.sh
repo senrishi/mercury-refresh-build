@@ -2,6 +2,8 @@
 set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == true ]] || { echo 'Cloud execution only'; exit 1; }
 ROOT="$PWD"
+# Upstream build notifications can hang on a headless hosted Mac.
+export MOZ_NOSPAM=1
 mkdir -p output
 exec > >(tee -a "$ROOT/output/build.log") 2>&1
 python3 scripts/preflight.py
